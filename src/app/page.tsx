@@ -1,7 +1,9 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useInfinityWebAuth } from "@/hooks/useInfinityWebAuth";
+import { getRemoteGameState, saveRemoteGameState } from "@/lib/infinity-web-auth";
 
 type Tile = number | null;
 type Board = Tile[][];
@@ -60,6 +62,13 @@ export default function Home() {
   const [best, setBest] = useState(0);
   const [history, setHistory] = useState<{ board: Board; score: number }[]>([]);
   const [message, setMessage] = useState("");
+  const [remoteReady, setRemoteReady] = useState(false);
+  const { user, isLoading: authLoading, login, logout } = useInfinityWebAuth();
+  const localStateRef = useRef({ board, score, best });
+
+  useEffect(() => {
+    localStateRef.current = { board, score, best };
+  }, [board, score, best]);
 
   useEffect(() => {
     const saved = window.localStorage.getItem("infinity-web-game");
@@ -80,6 +89,31 @@ export default function Home() {
   useEffect(() => {
     window.localStorage.setItem("infinity-web-game", JSON.stringify({ board, score, best }));
   }, [board, score, best]);
+
+  useEffect(() => {
+    if (!user) {
+      return;
+    }
+    let active = true;
+    void getRemoteGameState().then(remote => {
+      if (!active) return;
+      if (remote?.board) {
+        setBoard(remote.board);
+        setScore(remote.score);
+        setBest(remote.best);
+      } else {
+        void saveRemoteGameState(localStateRef.current);
+      }
+      setRemoteReady(true);
+    }).catch(() => {
+      if (active) setMessage("Cloud sync is temporarily unavailable.");
+    });
+    return () => { active = false; };
+  }, [user]);
+
+  useEffect(() => {
+    if (user && remoteReady) void saveRemoteGameState({ board, score, best });
+  }, [board, score, best, remoteReady, user]);
 
   const maxTile = useMemo(() => highest(board), [board]);
 
@@ -134,7 +168,7 @@ export default function Home() {
           <span>infinity</span>
         </a>
         <div className="nav-links"><a href="#play">Play</a><a href="#about">About</a><a href="/privacy">Privacy</a></div>
-        <a className="account-link" href="https://myaccount.chefu.co.za">Account <span>↗</span></a>
+        {user ? <div className="profile-area"><button className="profile-button" onClick={() => void logout()} title="Sign out"><span className="profile-avatar">{user.photoURL ? <Image src={user.photoURL} alt="" width={30} height={30} /> : (user.displayName || user.email || "IN").slice(0, 2).toUpperCase()}</span><span className="profile-label">{user.displayName || user.email}</span><span>↗</span></button></div> : <button className="account-link" onClick={login} disabled={authLoading}>{authLoading ? "Checking..." : "Sign in"} <span>↗</span></button>}
       </nav>
 
       <section className="hero" id="play">
